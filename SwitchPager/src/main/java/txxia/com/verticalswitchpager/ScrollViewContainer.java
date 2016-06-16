@@ -4,6 +4,7 @@ import android.content.Context;
 import android.support.v4.view.MotionEventCompat;
 import android.support.v4.view.VelocityTrackerCompat;
 import android.support.v4.view.ViewCompat;
+import android.support.v4.view.ViewPager;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.MotionEvent;
@@ -13,14 +14,13 @@ import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.ViewParent;
 import android.view.animation.Interpolator;
-import android.widget.ScrollView;
 import android.widget.Scroller;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 包含两个ScrollView的容器
+ * 上下可滑动
  *
  * @author cuiqing
  */
@@ -56,38 +56,12 @@ public class ScrollViewContainer extends ViewGroup {
     private static final int MAX_SETTLE_DURATION = 600; // ms
     private static final int DEFAULT_GUTTER_SIZE = 16; // dips
 
-    /**
-     * 自动上滑
-     */
-    public static final int AUTO_UP = 0;
-    /**
-     * 自动下滑
-     */
-    public static final int AUTO_DOWN = 1;
-    /**
-     * 动画完成
-     */
-    public static final int DONE = 2;
-
-    /**
-     * 拖动
-     */
-    public static final int SCROLL = 3;
-
     private static final Interpolator sInterpolator = new Interpolator() {
         public float getInterpolation(float t) {
             t -= 1.0f;
             return t * t * t * t * t + 1.0f;
         }
     };
-
-    /**
-     * 动画速度
-     */
-    public float speed;
-
-    private boolean isMeasured = false;
-
 
     private int mCurItem;   // Index of currently displayed page.
 
@@ -96,15 +70,8 @@ public class ScrollViewContainer extends ViewGroup {
      */
     private VelocityTracker vt;
 
-    private int mViewHeight;
-    private int mViewWidth;
-
     private View mTopView;
     private View mBottomView;
-
-    private boolean canPullDown;
-    private boolean canPullUp;
-    private int state = DONE;
 
     private Scroller mScroller;
     /**
@@ -154,33 +121,6 @@ public class ScrollViewContainer extends ViewGroup {
     private int mMinimumVelocity;
     private int mMaximumVelocity;
     private int mFlingDistance;
-
-    private Runnable mAutoScroll = new Runnable() {
-        @Override
-        public void run() {
-            if (mMoveLen != 0) {
-                if (state == AUTO_UP) {
-                    mMoveLen -= speed;
-                    if (mMoveLen <= -mViewHeight) {
-                        mMoveLen = -mViewHeight;
-                        state = DONE;
-                        mCurrentViewIndex = 1;
-                    }
-                    post(mAutoScroll);
-                } else if (state == AUTO_DOWN) {
-                    mMoveLen += speed;
-                    if (mMoveLen >= 0) {
-                        mMoveLen = 0;
-                        state = DONE;
-                        mCurrentViewIndex = 0;
-                    }
-                    post(mAutoScroll);
-                }
-            }
-            onScrollChange();
-            requestLayout();
-        }
-    };
 
     private List<OnPageChangeListener> mOnPageChangeListeners;
 
@@ -264,27 +204,6 @@ public class ScrollViewContainer extends ViewGroup {
     }
 
     /**
-     * 返回顶部
-     */
-    public void upToTop() {
-        mMoveLen = 0;
-        mTopView.scrollTo(0, 0);
-        mCurrentViewIndex = 0;
-        requestLayout();
-        onScrollChange();
-    }
-
-    /**
-     * 跳转到图文信息页
-     */
-    public void downToBottomView() {
-        mMoveLen = -mViewHeight;
-        mCurrentViewIndex = 1;
-        requestLayout();
-        onScrollChange();
-    }
-
-    /**
      * 获取当前显示View
      *
      * @return
@@ -356,7 +275,7 @@ public class ScrollViewContainer extends ViewGroup {
                 final float xDiff = Math.abs(x - mInitialMotionX);
 
                 Log.d(TAG, "move mIsBeingDragged=" + mIsBeingDragged + "   mIsUnableToDrag=" + mIsUnableToDrag + "  yDiff=" + yDiff);
-                if (dy != 0 && !isGutterDrag(mLastMotionY, dy) && canScroll(false, (int) dy, (int) x, (int) y)) {
+                if (dy != 0 && !isGutterDrag(mLastMotionY, dy) && canScroll((int) dy, (int) x, (int) y)) {
                     // Nested view has scrollable area under this point. Let it be handled there.
                     mLastMotionX = x;
                     mLastMotionY = y;
@@ -445,12 +364,6 @@ public class ScrollViewContainer extends ViewGroup {
 
     @Override
     public boolean onTouchEvent(MotionEvent ev) {
-        if (ev.getAction() == MotionEvent.ACTION_DOWN) {
-            // Don't handle edge touches immediately -- they may actually belong to one of our
-            // descendants.
-            return false;
-        }
-
         if (getChildCount() == 0) {
             // Nothing to present or scroll; nothing to touch.
             return false;
@@ -462,7 +375,6 @@ public class ScrollViewContainer extends ViewGroup {
         mVelocityTracker.addMovement(ev);
 
         final int action = ev.getAction();
-        boolean needsInvalidate = false;
 
         switch (action & MotionEventCompat.ACTION_MASK) {
             case MotionEvent.ACTION_DOWN: {
@@ -474,6 +386,7 @@ public class ScrollViewContainer extends ViewGroup {
                 break;
             }
             case MotionEvent.ACTION_MOVE:
+
                 if (!mIsBeingDragged) {
                     final int pointerIndex = MotionEventCompat.findPointerIndex(ev, mActivePointerId);
                     final float x = MotionEventCompat.getX(ev, pointerIndex);
@@ -548,129 +461,6 @@ public class ScrollViewContainer extends ViewGroup {
         return true;
     }
 
-//    @Override
-//    public boolean dispatchTouchEvent(MotionEvent ev) {
-//        switch (ev.getActionMasked()) {
-//            case MotionEvent.ACTION_DOWN:
-//                state = DONE;
-//                try {
-//                    if (vt == null)
-//                        vt = VelocityTracker.obtain();
-//                    else
-//                        vt.clear();
-//                } catch (Exception e) {
-//                    e.printStackTrace();
-//                }
-//                mLastY = ev.getY();
-//                mLastX = ev.getX();
-//                vt.addMovement(ev);
-//                canPullUp = ((ScrollPullListener) mTopView).isScrollBottom();
-//                canPullDown = ((ScrollPullListener) mBottomView).isScrollTop();
-//                break;
-//            case MotionEvent.ACTION_POINTER_DOWN:
-//            case MotionEvent.ACTION_MOVE:
-//                vt.addMovement(ev);
-//                canPullUp = ((ScrollPullListener) mTopView).isScrollBottom();
-//                canPullDown = ((ScrollPullListener) mBottomView).isScrollTop();
-//                //如果是滚动状态，直接计算
-//                if (state == SCROLL) {
-//                    if (canPullUp && mCurrentViewIndex == 0) {
-//                        mMoveLen += (ev.getY() - mLastY);
-//                        // 防止上下越界
-//                        if (mMoveLen > 0) {
-//                            mMoveLen = 0;
-//                            mCurrentViewIndex = 0;
-//                        } else if (mMoveLen < -mViewHeight) {
-//                            mMoveLen = -mViewHeight;
-//                            mCurrentViewIndex = 1;
-//                        }
-//                        if (mMoveLen < -8) {
-//                            // 防止事件冲突
-//                            ev.setAction(MotionEvent.ACTION_CANCEL);
-//                        }
-//                    } else if (canPullDown && mCurrentViewIndex == 1) {
-//                        mMoveLen += (ev.getY() - mLastY);
-//                        // 防止上下越界
-//                        if (mMoveLen < -mViewHeight) {
-//                            mMoveLen = -mViewHeight;
-//                            mCurrentViewIndex = 1;
-//                        } else if (mMoveLen > 0) {
-//                            mMoveLen = 0;
-//                            mCurrentViewIndex = 0;
-//                        }
-//                        if (mMoveLen > 8 - mViewHeight) {
-//                            // 防止事件冲突
-//                            ev.setAction(MotionEvent.ACTION_CANCEL);
-//                        }
-//                    }
-//                } else {
-//                    int deltaY = (int) Math.abs(ev.getY() - mLastY);
-//                    int deltaX = (int) Math.abs(ev.getX() - mLastX);
-//                    if (canPullUp && mCurrentViewIndex == 0
-//                            && deltaY > deltaX
-//                            && deltaY > UiUtil.dp2px(getContext(), 10)) {
-//                        state = SCROLL;
-//                        mMoveLen += (ev.getY() - mLastY);
-//                        // 防止上下越界
-//                        if (mMoveLen > 0) {
-//                            mMoveLen = 0;
-//                            mCurrentViewIndex = 0;
-//                        } else if (mMoveLen < -mViewHeight) {
-//                            mMoveLen = -mViewHeight;
-//                            mCurrentViewIndex = 1;
-//
-//                        }
-//                    } else if (canPullDown && mCurrentViewIndex == 1
-//                            && deltaY > deltaX
-//                            && deltaY > UiUtil.dp2px(getContext(), 10)) {
-//                        state = SCROLL;
-//                        mMoveLen += (ev.getY() - mLastY);
-//                        // 防止上下越界
-//                        if (mMoveLen < -mViewHeight) {
-//                            mMoveLen = -mViewHeight;
-//                            mCurrentViewIndex = 1;
-//                        } else if (mMoveLen > 0) {
-//                            mMoveLen = 0;
-//                            mCurrentViewIndex = 0;
-//                        }
-//                    }
-//                }
-//                mLastY = ev.getY();
-//                mLastX = ev.getX();
-//                requestLayout();
-//                onScrollChange();
-//                break;
-//            case MotionEvent.ACTION_UP:
-//                mLastY = ev.getY();
-//                vt.addMovement(ev);
-//                vt.computeCurrentVelocity(700);
-//                // 获取Y方向的速度
-//                float mYV = vt.getYVelocity();
-//                if (mMoveLen == 0 || mMoveLen == -mViewHeight)
-//                    break;
-//                if (Math.abs(mYV) < 500) {
-//                    // 速度小于一定值的时候当作静止释放，这时候两个View往哪移动取决于滑动的距离
-//                    if (mMoveLen <= -mViewHeight / 2) {
-//                        state = AUTO_UP;
-//                    } else if (mMoveLen > -mViewHeight / 2) {
-//                        state = AUTO_DOWN;
-//                    }
-//                } else {
-//                    // 抬起手指时速度方向决定两个View往哪移动
-//                    if (mYV < 0)
-//                        state = AUTO_UP;
-//                    else
-//                        state = AUTO_DOWN;
-//                }
-//                if (state == AUTO_UP || state == AUTO_DOWN) {
-//                    post(mAutoScroll);
-//                }
-//                break;
-//
-//        }
-//        super.dispatchTouchEvent(ev);
-//        return true;
-//    }
 
 
     @Override
@@ -844,11 +634,11 @@ public class ScrollViewContainer extends ViewGroup {
         }
     }
 
-    private boolean canScroll(boolean checkV, int dy, int x, int y) {
+    private boolean canScroll(int dy, int x, int y) {
         if (mCurItem == 0) {
-            return canScroll(mTopView, checkV, dy, x, y);
+            return canScroll(mTopView, dy, x, y);
         } else {
-            return canScroll(mBottomView, checkV, dy, x, y);
+            return canScroll(mBottomView, dy, x, y);
         }
     }
 
@@ -860,23 +650,18 @@ public class ScrollViewContainer extends ViewGroup {
      * Tests scrollability within child views of v given a delta of dx.
      *
      * @param v      View to test for vertical scrollability
-     * @param checkV Whether the view v passed should itself be checked for scrollability (true),
-     *               or just its children (false).
      * @param dy     Delta scrolled in pixels
      * @param x      X coordinate of the active touch point
      * @param y      Y coordinate of the active touch point
      * @return true if child views of v can be scrolled by delta of dx.
      */
-    protected boolean canScroll(View v, boolean checkV, int dy, int x, int y) {
-        if (v instanceof ScrollView) {
-            boolean canScroll = ViewCompat.canScrollVertically(v, -dy);
-            return canScroll;
-        }
+    protected boolean canScroll(View v, int dy, int x, int y) {
         if (v instanceof ViewGroup) {
             final ViewGroup group = (ViewGroup) v;
             final int scrollX = v.getScrollX();
             final int scrollY = v.getScrollY();
             final int count = group.getChildCount();
+
             // Count backwards - let topmost views consume scroll distance first.
             for (int i = count - 1; i >= 0; i--) {
                 // TODO: Add versioned support here for transformed views.
@@ -884,13 +669,13 @@ public class ScrollViewContainer extends ViewGroup {
                 final View child = group.getChildAt(i);
                 if (x + scrollX >= child.getLeft() && x + scrollX < child.getRight() &&
                         y + scrollY >= child.getTop() && y + scrollY < child.getBottom() &&
-                        canScroll(child, true, dy, x + scrollX - child.getLeft(),
+                        canScroll(child, dy, x + scrollX - child.getLeft(),
                                 y + scrollY - child.getTop())) {
                     return true;
                 }
             }
         }
-        return checkV && ViewCompat.canScrollVertically(v, -dy);
+        return ViewCompat.canScrollVertically(v, -dy);
     }
 
     private void onScrollChange() {
@@ -903,15 +688,4 @@ public class ScrollViewContainer extends ViewGroup {
         void onScrollChange(ScrollViewContainer v);
     }
 
-    public interface ScrollPullListener {
-        /**
-         * 是否滚动到底部
-         */
-        boolean isScrollBottom();
-
-        /**
-         * 是否滚动到顶部
-         */
-        boolean isScrollTop();
-    }
 }

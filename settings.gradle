@@ -1,1 +1,1 @@
-include ':app', ':verticalswitchpager'
+include ':sample','SwitchPager'
